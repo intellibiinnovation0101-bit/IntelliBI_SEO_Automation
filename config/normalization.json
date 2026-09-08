@@ -1,0 +1,42 @@
+{
+  "_comment": "Centralized, maintainable normalization for Lead Source, Technology and Lead Type. Rules are evaluated TOP-DOWN; the first rule whose 'any' keyword is a case-insensitive substring of the (whitespace-collapsed, lower-cased) value wins, else 'default'; an empty value -> blank_label. Edit here only; no categories are hard-coded in Python. NOTE ordering matters: paid-ads rules precede the organic 'Google Search' rule so 'Google Ads' is not miscounted as organic search.",
+  "blank_label": "Unknown",
+  "lead_source": {
+    "default": "Other",
+    "rules": [
+      { "value": "Online Advertisement", "any": ["google ad", "meta ad", "facebook ad", "advertis", "campaign", "paid"] },
+      { "value": "Google Search",        "any": ["google", "search in google"] },
+      { "value": "Friend / Referral",    "any": ["referral", "friend"] },
+      { "value": "Existing Student",     "any": ["existing student"] },
+      { "value": "AI Assistant",         "any": ["chatgpt", "claude", "gemini", "perplexity", "copilot"] },
+      { "value": "Social Media",         "any": ["instagram", "facebook", "linkedin", "youtube", "social", "insta"] },
+      { "value": "Walk-In / Board",      "any": ["walk", "board", "hoard", "banner"] }
+    ]
+  },
+  "technology": {
+    "default": "Other",
+    "primary_only": true,
+    "split_on": [","],
+    "rules": [
+      { "value": "Data Engineering",       "any": ["data engineer", "data engineering", "databricks", "aws data", "azure data", "gcp data", "snowflake", "pyspark"] },
+      { "value": "Data Analytics",         "any": ["data analyt", "data analyst", "power bi", "tableau", "business data", "advance data"] },
+      { "value": "Data Science",           "any": ["data science", "data scien"] },
+      { "value": "AI / Generative AI",     "any": ["generative ai", "genai", "gen ai", "agentic", "artificial intelligence", "full stack ai", "machine learning"] },
+      { "value": "Full Stack Development", "any": ["full stack", "fullstack", "full-stack", "java full", "python full", "mern", "mean"] },
+      { "value": "DevOps / Cloud",         "any": ["devops", "dev ops"] },
+      { "value": "Software Testing",       "any": ["testing", " qa"] }
+    ]
+  },
+  "lead_type": {
+    "_comment": "Preserve the EXACT Current Status values; never merge/shorten. Non-IT is checked before IT so 'non it' is not caught by the IT rule. Any value not matched here is passed through unchanged (passthrough:true).",
+    "default": "Other",
+    "passthrough": true,
+    "rules": [
+      { "value": "Working Professional - Non IT", "any": ["non it", "non-it", "non -it", "non- it", "nonit"] },
+      { "value": "Working Professional - IT",     "any": ["professional - it", "professional -it", "professional- it", "professional-it", "prof - it", "prof-it", "wp - it", "wp-it"] },
+      { "value": "Fresher - Passed Out",          "any": ["passed out", "passed-out", "passout", "passedout"] },
+      { "value": "Fresher - Pursuing",            "any": ["pursuing", "pursue"] },
+      { "value": "Career Break",                  "any": ["career break", "career-break", "careerbreak"] }
+    ]
+  }
+}

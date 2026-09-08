@@ -1,0 +1,79 @@
+# ============================================================================
+#  IntelliBI SEO Walk-In Analytics — configuration
+#  All settings the operator may change live here. Nothing machine-specific.
+# ============================================================================
+google:
+  # Service-account JSON (place in credentials/). Same Google project as
+  # IntelliBI_Operations_Automation — reuse that key. Share the source sheet
+  # (Viewer) with the service-account email.
+  service_account_file: service_account.json
+  # Drive uploads are done by IMPERSONATING this Workspace user (domain-wide
+  # delegation), because a service account has no storage quota of its own. This
+  # user must be able to edit the destination folders. Same user the Follow-Up
+  # report uses. Leave blank to upload directly as the service account (will fail
+  # with 'storageQuotaExceeded' on a normal My Drive folder).
+  impersonate_user: "info@intellibiinnovationstechnologies.in"
+
+source:
+  # "Student Inquiry Tracker – Walk-in / Call / WhatsApp/ Campaign/Website/Bot Reply"
+  spreadsheet_id: "19Ecal2JpOL1FbzGKWlno4ZywG3HsXsiK-BmMzew5TqQ"
+  tabs:
+    - "Walk-In New"
+    - "Walk-In Old"
+
+drive:
+  # Master flag: upload to Drive at all.
+  upload: true
+  # Destination Drive folder ID per report type. Each folder must be shared with
+  # the service-account email as Editor.
+  folders:
+    weekly:  "1lksiBd4ICujObuVuv7RRe-TOcSApEfxD"
+    monthly: "1qeAJIkX04Qa-Cn8W782LskV_ej5a_GxL"
+    manual:  "1iERBXFuqYpTdS3gGDmfyLneWwudHCvpH"
+  # Base name shown for the uploaded report in Drive. The reporting PERIOD is
+  # appended automatically (Monthly -> "Sep-2026"; Weekly/Manual -> the window
+  # range "01-Sep-2026 to 07-Sep-2026"), e.g. "SEO WalkIn Weekly 01-Sep-2026 to
+  # 07-Sep-2026". So each period is its own dated file; re-running the SAME period
+  # updates that file in place. Leave a type blank to fall back to the dated file name.
+  report_names:
+    weekly:  "SEO WalkIn Weekly"
+    monthly: "SEO WalkIn Monthly"
+    manual:  "SEO WalkIn Manual"
+
+# NOTE: WHICH reports to generate, the reference dates, and EMAIL on/off are set
+# at the top of seo_reports/pySEOWalkInAnalysisReport.py (USER SETTINGS block).
+# This file holds the wiring only (source, folders, recipients, normalization).
+
+email:
+  # Sender must match a GMAIL_SENDER in credentials/email_config.py (same key as
+  # the Operations project). The app password is read from there — never stored here.
+  # (Turn emailing on/off with EMAIL_SEND in the script's USER SETTINGS.)
+  sender: "info@intellibiinnovationstechnologies.in"
+  recipients:
+    - "intellibiseo@gmail.com"
+    - "info@intellibiinnovationstechnologies.in"
+  attach_workbook: true
+
+report:
+  week_starts_on: "monday"      # monday | sunday
+  timezone: "Asia/Kolkata"
+  # Lead Source label treated as the SEO headline metric (post-normalization).
+  google_search_label: "Google Search"
+
+# New/Old column mapping -> one normalized schema. Header matching ignores case
+# and surrounding whitespace, so the sheet's stray trailing spaces are tolerated.
+field_mapping:
+  new:
+    date: "Timestamp"
+    lead_source: "How did you hear about IntelliBI?"
+    technology: "Which technology are you interested in learning?"
+    lead_type: "Current Status"
+    mobile: "Mobile Number"
+    name: "Full Name"
+  old:
+    date: "Timestamp"
+    lead_source: "How did you hear about us?"
+    technology: "Course Interested"
+    lead_type: "Background"
+    mobile: "Phone number"
+    name: "First and last name"
