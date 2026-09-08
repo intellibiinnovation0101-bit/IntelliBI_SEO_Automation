@@ -1,0 +1,20 @@
+ .gitignore                               |  36 [32m+++[m
+ README.md                                | 138 [32m++++++++[m[31m-[m
+ common/config_loader.py                  | 119 [32m++++++++[m
+ common/email_utils.py                    | 165 [32m+++++++++++[m
+ common/google_utils.py                   | 118 [32m++++++++[m
+ common/logging_utils.py                  |  42 [32m+++[m
+ common/paths.py                          |  25 [32m++[m
+ common/report_builder.py                 | 495 [32m+++++++++++++++++++++++++++++++[m
+ common/report_periods.py                 |  85 [32m++++++[m
+ common/seo_normalize.py                  |  78 [32m+++++[m
+ common/walkin_data.py                    | 154 [32m++++++++++[m
+ config/config.yaml                       |  79 [32m+++++[m
+ config/normalization.json                |  42 [32m+++[m
+ credentials/README.txt                   |   7 [32m+[m
+ credentials/email_config.example.py      |  15 [32m+[m
+ requirements.txt                         |   4 [32m+[m
+ scripts/run_seo_reports.py               |  22 [32m++[m
+ scripts/setup_schedule.ps1               |  58 [32m++++[m
+ seo_reports/pySEOWalkInAnalysisReport.py | 292 [32m++++++++++++++++++[m
+ 19 files changed, 1973 insertions(+), 1 deletion(-)
