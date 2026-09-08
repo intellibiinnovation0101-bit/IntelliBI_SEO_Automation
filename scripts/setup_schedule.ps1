@@ -1,5 +1,5 @@
 <#
-  setup_schedule.ps1  —  register the daily IntelliBI SEO Walk-In report task.
+  setup_schedule.ps1  -  register the daily IntelliBI SEO Walk-In report task.
 
   Mirrors the IntelliBI_Operations_Automation scheduling approach: it creates a
   Windows Scheduled Task that runs the project's virtual-environment Python
@@ -15,7 +15,7 @@
 #>
 
 param(
-    [string]$Time = "19:00",                       # daily run time (24h, local) — 7:00 PM
+    [string]$Time = "19:00",                       # daily run time (24h, local) - 7:00 PM
     [string]$TaskName = "IntelliBI_SEO_WalkIn_Report"
 )
 
@@ -50,7 +50,7 @@ $Trigger = New-ScheduledTaskTrigger -Daily -At $Time
 $Settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -RestartCount 2 -RestartInterval (New-TimeSpan -Minutes 5)
 
 Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger `
-    -Settings $Settings -Description "IntelliBI SEO Walk-In Analytics — daily Weekly + Monthly reports" `
+    -Settings $Settings -Description "IntelliBI SEO Walk-In Analytics - daily Weekly + Monthly reports" `
     -Force | Out-Null
 
 Write-Host ""
