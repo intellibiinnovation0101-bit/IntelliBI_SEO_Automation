@@ -15,6 +15,11 @@ import config_loader as cfg
 import seo_normalize as norm
 import logging_utils
 
+try:
+    from dateutil import parser as _du          # robust, tolerant date parsing
+except Exception:                               # pragma: no cover
+    _du = None
+
 log = logging_utils.get_logger("seo_walkin_data")
 
 _DEFAULT_MAP = {
@@ -36,11 +41,15 @@ _DEFAULT_MAP = {
     },
 }
 
+# Fixed formats are the fast path; anything not matching falls through to the
+# tolerant dateutil parser in parse_date() below so no real walk-in is dropped.
 _DATE_FORMATS = (
     "%m/%d/%Y %H:%M:%S", "%m/%d/%Y", "%d-%b-%Y %I:%M %p", "%d-%b-%Y",
     "%d/%m/%Y %H:%M:%S", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d",
-    "%m/%d/%Y %H:%M", "%d-%m-%Y",
+    "%m/%d/%Y %H:%M", "%d-%m-%Y", "%d.%m.%Y", "%d-%B-%Y",
 )
+
+_ORDINAL_RE = re.compile(r"(?<=\d)(st|nd|rd|th)\b", re.I)
 
 
 def _norm_header(s) -> str:
@@ -56,7 +65,18 @@ def _col_index(header_row: list, wanted: str):
 
 
 def parse_date(v):
-    """Return a datetime.date from a string, datetime, or Excel serial; else None."""
+    """Return a datetime.date from a string, datetime, or Excel serial; else None.
+
+    Tolerant by design: walk-in 'Timestamp' cells come from Google Forms
+    (US 'M/D/YYYY h:mm:ss') AND from staff who hand-type Indian-style dates
+    ('23-09-2026', '23.09.2026', '14-July-2025', '16-07-2025 : 2 :00', '3rd Sep
+    2026', Excel serials). Previously any value outside a short fixed list was
+    silently dropped, which removed real walk-ins from the report. We now:
+      1) try the fast fixed formats, then
+      2) fall back to dateutil with a SEPARATOR-AWARE day/month order so an
+         ambiguous '05-09-2026' is read as 5-Sep (Indian), not 9-May, while a
+         slash date '9/5/2026' stays US month-first (Google Form).
+    """
     if v is None or v == "":
         return None
     if isinstance(v, _dt.datetime):
@@ -68,13 +88,31 @@ def parse_date(v):
             return (_dt.datetime(1899, 12, 30) + _dt.timedelta(days=float(v))).date()
         except Exception:
             return None
+
     s = str(v).strip()
     if not s:
         return None
-    for f in _DATE_FORMATS:
+    for f in _DATE_FORMATS:                       # fast path
         try:
             return _dt.datetime.strptime(s, f).date()
         except ValueError:
+            continue
+
+    if _du is None:                               # dateutil unavailable
+        return None
+    # normalise common dirt, then let dateutil handle the rest
+    t = re.sub(r"\s*:\s*", ":", s)                # "2 :00" -> "2:00"
+    t = t.replace("@", " ")
+    t = _ORDINAL_RE.sub("", t)
+    t = re.sub(r"\s+", " ", t).strip(" ,")
+    if not t:
+        return None
+    dayfirst = "/" not in t                       # slash=US(M/D); dash/dot/text=Indian(D/M)
+    default = _dt.datetime(_dt.date.today().year, 1, 1)
+    for df in (dayfirst, not dayfirst):
+        try:
+            return _du.parse(t, dayfirst=df, fuzzy=True, default=default).date()
+        except (ValueError, OverflowError, TypeError):
             continue
     return None
 

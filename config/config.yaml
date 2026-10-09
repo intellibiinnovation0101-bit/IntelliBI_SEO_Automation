@@ -59,6 +59,10 @@ report:
   timezone: "Asia/Kolkata"
   # Lead Source label treated as the SEO headline metric (post-normalization).
   google_search_label: "Google Search"
+  # Walk-In lead target per calendar month (Weekly / Monthly "Lead Performance"
+  # e-mail section and "Weekly / Monthly Lead Trend" tab). The weekly target is
+  # derived from it: monthly target ÷ days in that month, summed over Mon–Sun.
+  monthly_walkin_target: 70
 
 # New/Old column mapping -> one normalized schema. Header matching ignores case
 # and surrounding whitespace, so the sheet's stray trailing spaces are tolerated.

@@ -25,6 +25,31 @@ charts. Google Search is highlighted throughout.
 Comparisons are always like-for-like (a partial current period is never compared
 against a full previous one).
 
+## Walk-In lead performance vs target (Weekly / Monthly)
+Added 09-Oct-2026. Manual reports and every existing tab / e-mail section are unchanged.
+
+| | Weekly report | Monthly report |
+|---|---|---|
+| E-mail section | **Weekly Walk-In Lead Performance – Last 5 Completed Weeks + Current Week** | **Monthly Walk-In Lead Performance – Last 5 Completed Months + Current Month** |
+| New tab (last) | **Weekly Lead Trend** — last 11 completed weeks + current week | **Monthly Lead Trend** — last 11 completed months + current month |
+| Period | Monday – Sunday | calendar month |
+| Target | see formula below | 70 Walk-In leads per month |
+
+Each row: period, Walk-In leads, target, Achievement % (= leads ÷ target), status. **Green = leads above target, red = at or below target.** The current week / month is counted up to the report date (the same figure as the Summary's *Current* total), marked *In progress* (e-mail chip, "▶ current" row, `*` on the chart axis, lighter bar) with its days elapsed and its pro-rata target to date; its colour still compares against the full target. The tab adds three summary cards, a completed-periods total row and a chart: bars = actual leads (green / red, current lighter, value labels), dashed line = target.
+
+**Weekly target formula** (no fixed weekly number):
+
+    weekly target = Σ over Mon..Sun of  monthly target ÷ days in that day's month
+
+So a week inside a 31-day month = 7 × 70 / 31 = **15.8**, inside a 30-day month = **16.3**, inside February = **17.5**; a week crossing a month end takes each day from its own month. Over a whole month the daily shares add back up to exactly 70, so weekly and monthly targets agree.
+
+- Target setting: `report.monthly_walkin_target` in `config/config.yaml` (70). Number of periods: `TREND_WEEKS_EMAIL / TREND_WEEKS_TAB / TREND_MONTHS_EMAIL / TREND_MONTHS_TAB` (5 / 11) in the script's USER SETTINGS.
+- Counting reuses the report's own normalised, de-duplicated Walk-In records (`walkin_data.load_walkins`); one walk-in counts once, in the week / month of its date; undated rows are not counted (as everywhere in the report).
+- Reference date: the report's own period end — today, `WEEKLY_REFERENCE_DATE`, or `MONTHLY_MONTH` / `MONTHLY_YEAR` (a past month is shown complete).
+- One calculation (`common/walkin_targets.py`) feeds both the e-mail and the tab, so they always reconcile (the e-mail = the tab's last 6 rows).
+- Weeks always run Monday – Sunday (`report.week_starts_on` should stay `monday` so the Summary's current week is the same week).
+- Verification (offline, synthetic data): `python seo_validation\verify_walkin_lead_trend.py`.
+
 ## Layout
 
 ```

@@ -68,13 +68,96 @@ def _growth_fill(cur, prev):
     return "#F5B7B1"           # red
 
 
-def build_body(period, cur, prev, gs_label, drive_link, gen_stamp):
+# ── Weekly / Monthly Walk-In Lead Performance vs target (e-mail section) ──────
+# Same presentation as the "Performance vs Goals" bars of the Sales lead report
+# (pyConsolidatedLeadPerformanceReport.build_email_body): name + value on one
+# line, a rounded bar with a target marker, a note line underneath. Figures come
+# from walkin_targets.trend_for_period — the SAME rows as the workbook's
+# "Weekly / Monthly Lead Trend" tab.
+_ABOVE_HEX, _BELOW_HEX = "2E7D32", "C0392B"
+_ABOVE_CUR_HEX, _BELOW_CUR_HEX = "66BB6A", "E57373"
+
+
+def _sec(title):
+    return ("<div style='font-size:11px;font-weight:700;letter-spacing:.06em;"
+            "text-transform:uppercase;color:#5b6b86;margin:18px 0 8px;padding-bottom:5px;"
+            f"border-bottom:1px solid #e2e8f0'>{title}</div>")
+
+
+def _bar(name, value_label, pct, hexc, goal_pct, note, value_hex=None):
+    pct = max(0, min(100, pct))
+    goal = (f"<div style='position:absolute;top:-2px;bottom:-2px;left:{goal_pct:.0f}%;"
+            "width:2px;background:#334155'></div>") if goal_pct is not None else ""
+    return (
+        "<div style='margin:11px 0'>"
+        "<table role='presentation' width='100%' style='border-collapse:collapse'><tr>"
+        f"<td style='font-size:13px;color:#1a2a48'>{name}</td>"
+        f"<td style='font-size:13px;font-weight:700;color:#{value_hex or hexc};text-align:right;"
+        f"white-space:nowrap'>{value_label}</td>"
+        "</tr></table>"
+        "<div style='height:12px;border-radius:999px;background:#eef1f6;position:relative;"
+        "overflow:hidden;margin-top:5px'>"
+        f"<div style='height:100%;border-radius:999px;background:#{hexc};width:{pct:.0f}%'></div>"
+        f"{goal}</div>"
+        f"<div style='font-size:10.5px;color:#5b6b86;margin-top:3px'>{note}</div></div>")
+
+
+def lead_performance_section(trend) -> str:
+    """'Weekly Walk-In Lead Performance – Last 5 Completed Weeks + Current Week'
+    (or the Monthly equivalent): one bar per period, actual leads against the
+    period's target (marker), green above / red at-or-below, the current period
+    flagged as in progress."""
+    if not trend or not trend.get("email"):
+        return ""
+    import walkin_targets as WT
+    rows = trend["email"]
+    is_week = trend["kind"] == "week"
+    unit, Unit = ("week", "Week") if is_week else ("month", "Month")
+    n_done = len(rows) - 1
+    title = (f"{'Weekly' if is_week else 'Monthly'} Walk-In Lead Performance &ndash; "
+             f"Last {n_done} Completed {Unit}s + Current {Unit}")
+    scale = max([x["actual"] for x in rows] + [x["target_exact"] for x in rows] + [1]) * 1.12
+    done = [x for x in rows if not x["current"]]
+    above = sum(1 for x in done if x["above"])
+    html = _sec(title)
+    html += (f"<p style='margin:0 0 4px;color:#5b6b86;font-size:12px;line-height:1.5'>"
+             f"<b style='color:#1a2a48'>{above} of {len(done)}</b> completed {unit}s above target "
+             f"&nbsp;&middot;&nbsp; {WT.target_formula_text(trend['kind'], trend['monthly_target'])} "
+             f"&nbsp;&middot;&nbsp; <span style='color:#{_ABOVE_HEX}'>&#9632;</span> above target "
+             f"<span style='color:#{_BELOW_HEX}'>&#9632;</span> at / below target "
+             f"&nbsp;&middot;&nbsp; | = target</p>")
+    for x in reversed(rows):                      # newest first, current at the top
+        hexc = ((_ABOVE_CUR_HEX if x["above"] else _BELOW_CUR_HEX) if x["in_progress"]
+                else (_ABOVE_HEX if x["above"] else _BELOW_HEX))
+        vhex = _ABOVE_HEX if x["above"] else _BELOW_HEX
+        ach = f"{x['achievement']:.0f}%" if x["achievement"] is not None else "&mdash;"
+        name = WT.period_label(x)
+        if x["current"]:
+            chip = ("In progress" if x["in_progress"] else f"Current {unit}")
+            name = (f"<b>{name}</b> <span style='display:inline-block;padding:1px 7px;"
+                    f"border-radius:999px;background:#1B355E;color:#ffffff;font-size:10px;"
+                    f"font-weight:700;margin-left:4px'>{chip}</span>")
+        note = (f"{'Weekly' if is_week else 'Monthly'} target {x['target']:g} &middot; "
+                f"<b style='color:#{vhex}'>{x['status']}</b>")
+        if x["in_progress"]:
+            note += " &middot; " + WT.progress_text(x).replace("In progress · ", "")
+        html += _bar(name, f"{x['actual']} / {x['target']:g} &middot; {ach}",
+                     x["actual"] / scale * 100.0, hexc, x["target_exact"] / scale * 100.0,
+                     note, value_hex=vhex)
+    return html
+
+
+def build_body(period, cur, prev, gs_label, drive_link, gen_stamp, trend=None):
     tot_c, tot_p = len(cur), len(prev)
     diff = tot_c - tot_p
     g = _pct(tot_c, tot_p)
     growth_txt = f"{g*100:+.1f}%" if g is not None else "New"
     rowbg = _growth_fill(tot_c, tot_p)                       # colour code from Growth/Decline %
     grow_color = "#2E7D32" if (g or 0) >= 0 else "#C0392B"
+    trend_tab_note = (f", {'Weekly' if trend['kind'] == 'week' else 'Monthly'} Lead Trend"
+                      if trend else "")
+    perf_html = lead_performance_section(trend)
+    perf_html = (perf_html + "\n    ") if perf_html else ""
 
     def card(label, value, value_color=NAVY):
         # card style like the attachment, tinted by the Growth/Decline % colour code
@@ -110,9 +193,9 @@ def build_body(period, cur, prev, gs_label, drive_link, gen_stamp):
       {card("Difference", f"{diff:+d}")}
       {card("Growth / Decline %", growth_txt, grow_color)}
     </tr></table>
-    {link_html}
+    {perf_html}{link_html}
     <p style='font-size:11px;color:{GREY};margin-top:14px'>
-      Full detail — Summary, Lead Source Trend, Technology Trend, Lead Type Trend —
+      Full detail — Summary, Lead Source Trend, Technology Trend, Lead Type Trend{trend_tab_note} —
       is in the attached workbook. Automated report from IntelliBI SEO Automation.</p>
   </div>
 </div>"""
@@ -154,12 +237,12 @@ def send(subject, html_body, recipients, sender, attachment_path=None, dry_run=F
 
 
 def send_report(period, cur, prev, gs_label, drive_link, gen_stamp,
-                attachment_path, dry_run=False):
+                attachment_path, dry_run=False, trend=None):
     """High-level: build the body from config recipients/sender and send."""
     recipients = cfg.get("email.recipients", []) or []
     sender = cfg.get("email.sender", "info@intellibiinnovationstechnologies.in")
     attach = attachment_path if cfg.get("email.attach_workbook", True) else None
     subject = (f"IntelliBI SEO Walk-In — {period.label} "
                f"({period.cur_start.strftime('%d-%b')}–{period.cur_end.strftime('%d-%b-%Y')})")
-    body = build_body(period, cur, prev, gs_label, drive_link, gen_stamp)
+    body = build_body(period, cur, prev, gs_label, drive_link, gen_stamp, trend=trend)
     return send(subject, body, recipients, sender, attach, dry_run=dry_run)

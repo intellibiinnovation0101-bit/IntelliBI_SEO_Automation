@@ -40,6 +40,7 @@ import logging_utils             # noqa: E402
 import report_periods            # noqa: E402
 import report_builder            # noqa: E402
 import walkin_data               # noqa: E402
+import walkin_targets            # noqa: E402
 
 log = logging_utils.get_logger("pySEOWalkInAnalysisReport")
 
@@ -58,6 +59,15 @@ MANUAL_START_DATE     = None      # "YYYY-MM-DD"  (required when GENERATE_MANUAL
 MANUAL_END_DATE       = None      # "YYYY-MM-DD"  (required when GENERATE_MANUAL)
 
 EMAIL_SEND = True                 # email the report(s)? (recipients live in config.yaml)
+
+# Walk-In lead performance vs target (Weekly / Monthly only). Target: config.yaml
+# report.monthly_walkin_target (70 per month); the weekly target is derived from
+# it day by day (see common/walkin_targets.py). Counts = completed periods shown
+# BEFORE the current week / month.
+TREND_WEEKS_EMAIL  = 5            # e-mail: last 5 completed weeks + current week
+TREND_WEEKS_TAB    = 11           # "Weekly Lead Trend" tab: last 11 + current week
+TREND_MONTHS_EMAIL = 5            # e-mail: last 5 completed months + current month
+TREND_MONTHS_TAB   = 11           # "Monthly Lead Trend" tab: last 11 + current month
 UPLOAD_TO_DRIVE = True            # upload the report(s) to Drive?
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -98,17 +108,39 @@ def _window(records, start, end):
     return [r for r in records if r["date"] and start <= r["date"] <= end]
 
 
+def _lead_trend(period, records):
+    """Weekly / Monthly Walk-In lead performance vs target (None for Manual): last
+    TREND_*_EMAIL completed periods + the current one for the e-mail, last
+    TREND_*_TAB + the current one for the Lead Trend tab — one calculation for both."""
+    target = cfg.get("report.monthly_walkin_target", walkin_targets.DEFAULT_MONTHLY_TARGET)
+    try:
+        target = float(target)
+    except (TypeError, ValueError):
+        target = float(walkin_targets.DEFAULT_MONTHLY_TARGET)
+    weekly = str(period.label).lower() == "weekly"
+    return walkin_targets.trend_for_period(
+        records, period, target,
+        n_email=TREND_WEEKS_EMAIL if weekly else TREND_MONTHS_EMAIL,
+        n_tab=TREND_WEEKS_TAB if weekly else TREND_MONTHS_TAB)
+
+
 def _build_one(period, records, gen_stamp, sample=False):
     cur = _window(records, period.cur_start, period.cur_end)
     prev = _window(records, period.prev_start, period.prev_end)
     gs = cfg.get("report.google_search_label", "Google Search")
-    wb = report_builder.build_workbook(period, cur, prev, gs, gen_stamp, sample=sample)
+    trend = _lead_trend(period, records)
+    wb = report_builder.build_workbook(period, cur, prev, gs, gen_stamp, sample=sample, trend=trend)
     paths.ensure_dirs()
     out_path = os.path.join(str(paths.OUTPUT_DIR), period.fname() + ".xlsx")
     wb.save(out_path)
     log.info("%s | %s | current=%d previous=%d | saved %s",
              period.label, period.range_str(), len(cur), len(prev), os.path.basename(out_path))
-    return out_path, cur, prev
+    if trend:
+        last = trend["tab"][-1]
+        log.info("  %s Lead Trend: %d %ss; current %s %s → %d / target %s (%s)",
+                 period.label, len(trend["tab"]), trend["kind"], trend["kind"],
+                 walkin_targets.period_label(last), last["actual"], last["target"], last["status"])
+    return out_path, cur, prev, trend
 
 
 _folder_cache = {}
@@ -168,13 +200,14 @@ def _upload(drive, out_path, period):
         return None
 
 
-def _email(period, cur, prev, drive_link, gen_stamp, out_path, send_email):
+def _email(period, cur, prev, drive_link, gen_stamp, out_path, send_email, trend=None):
     if not send_email:
         return
     try:
         import email_utils
         gs = cfg.get("report.google_search_label", "Google Search")
-        email_utils.send_report(period, cur, prev, gs, drive_link, gen_stamp, out_path)
+        email_utils.send_report(period, cur, prev, gs, drive_link, gen_stamp, out_path,
+                                trend=trend)
     except Exception as e:
         log.warning("  email step skipped/failed: %s", e)
 
@@ -252,9 +285,9 @@ def run(periods, upload=True, send_email=True):
     ok = True
     for p in periods:
         try:
-            out_path, cur, prev = _build_one(p, records, gen_stamp)
+            out_path, cur, prev, trend = _build_one(p, records, gen_stamp)
             link = _upload(drive, out_path, p) if upload else None
-            _email(p, cur, prev, link, gen_stamp, out_path, send_email)
+            _email(p, cur, prev, link, gen_stamp, out_path, send_email, trend=trend)
         except Exception as e:
             ok = False
             log.exception("%s report FAILED: %s", p.label, e)
