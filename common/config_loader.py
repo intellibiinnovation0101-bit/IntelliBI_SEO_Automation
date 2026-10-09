@@ -83,6 +83,24 @@ def _mini_yaml(text: str) -> dict:
     return parse_block(0) or {}
 
 
+def read_yaml_file(path):
+    """Read and parse ONE YAML file with the same approach as config.yaml (PyYAML,
+    else the built-in parser) — but RAISE on problems instead of falling back to
+    defaults: OSError / UnicodeDecodeError when it cannot be read, ValueError when
+    it is not valid YAML. Used for settings that must not silently default
+    (config/walkin_target.yaml)."""
+    with open(path, "r", encoding="utf-8-sig") as fh:      # tolerate a Notepad BOM
+        text = fh.read()
+    try:
+        import yaml
+    except ImportError:
+        return _mini_yaml(text.replace("\r\n", "\n"))
+    try:
+        return yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        raise ValueError(f"not valid YAML ({str(e).splitlines()[0]})") from None
+
+
 def load() -> dict:
     global _cache
     if _cache is not None:

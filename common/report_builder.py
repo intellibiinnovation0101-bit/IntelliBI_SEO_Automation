@@ -478,58 +478,106 @@ _GEN = [""]   # module-local generation stamp for _trend_tab header
 
 
 # ── WEEKLY / MONTHLY LEAD TREND (actual Walk-In leads vs target) ─────────────
-# Colours: above target = green, at / below target = red (the report's own
-# F_GREEN / F_RED row fills; strong tones for the chart bars). The current,
-# still-running week / month is drawn in a LIGHTER tint of the same colour and
-# marked "*" / "In progress" so it is never read as a finished period.
+# Card accent for 'completed periods above target' (strictly above = green).
 C_ABOVE, C_BELOW = "2E7D32", "C0392B"
-C_ABOVE_CUR, C_BELOW_CUR = "8FD19E", "F1948A"
 C_TARGET = "1B355E"
 
 
-def _lead_trend_chart(ws, title, hdr_row, first, last, hcol, anchor, unit, w=24, h=9.5):
-    """Bars = actual Walk-In leads per week / month (4 stacked series, only one
-    filled per period: completed-above, completed-below, current-above,
-    current-below -> green / red, current in a lighter tint), plus the target as
-    a dashed reference line on the same axis. Value labels on the bars."""
+# ── Red / Amber / Green vs the target (Weekly AND Monthly Lead Trend) ───────
+# Bands from walkin_targets.perf_band (< 60 % red, 60–80 % amber, > 80 % green of
+# the configured monthly target). Strong tones for chart bars and text, light
+# tones for table rows (F_RED is the report's existing red row fill).
+C_RAG = {"red": "C0392B", "amber": "E69500", "green": "2E7D32"}        # bars
+C_RAG_CUR = {"red": "F1948A", "amber": "F7CB73", "green": "8FD19E"}    # current month (lighter)
+T_RAG = {"red": "C0392B", "amber": "9A6700", "green": "2E7D32"}        # text (readable on fills)
+F_AMBER = "FDEBC8"
+F_RAG = {"red": F_RED, "amber": F_AMBER, "green": F_GREEN}             # table row fills
+
+
+def _nice_axis_max(top):
+    """Round the value axis maximum up to a clean number with head-room for labels."""
+    top = max(float(top), 1.0) * 1.18
+    for step in (5, 10, 20, 25, 50, 100, 200, 250, 500, 1000):
+        if top / step <= 8:
+            return int(-(-top // step) * step), step
+    return int(top) + 1, None
+
+
+def _lead_chart(ws, title, hdr_row, first, last, hcol, anchor, target, cur_idx,
+                        cur_band, w=25.5, h=11.5):
+    """One clean column per week / month, coloured Red / Amber / Green by % of its
+    target (3 series — exactly one holds each period's value, overlap 100 so every
+    bar sits centred on its period), value labels on top of every bar, and the
+    target as a bold dashed line. The current, in-progress period is drawn in a
+    lighter tint with a dashed outline (label '… (to date)')."""
     from openpyxl.chart.label import DataLabelList
+    from openpyxl.chart.marker import DataPoint
     from openpyxl.chart.shapes import GraphicalProperties
-    from openpyxl.drawing.line import LineProperties
-    bar = BarChart(); bar.type = "col"; bar.grouping = "stacked"; bar.overlap = 100
-    bar.gapWidth = 45; bar.title = title; bar.style = 10; bar.height = h; bar.width = w
-    data = Reference(ws, min_col=hcol + 1, max_col=hcol + 4, min_row=hdr_row, max_row=last)
-    bar.add_data(data, titles_from_data=True)
-    cats = Reference(ws, min_col=hcol, max_col=hcol, min_row=first, max_row=last)
-    bar.set_categories(cats)
     from openpyxl.chart.text import RichText
+    from openpyxl.drawing.line import LineProperties
     from openpyxl.drawing.text import Paragraph, ParagraphProperties, CharacterProperties
 
-    def _lbl_font(hexc):
+    def _txt(sz, bold, hexc):
         return RichText(p=[Paragraph(pPr=ParagraphProperties(defRPr=CharacterProperties(
-            sz=1000, b=True, solidFill=hexc)), endParaRPr=CharacterProperties())])
-    for ser, colour, txt in zip(bar.series, (C_ABOVE, C_BELOW, C_ABOVE_CUR, C_BELOW_CUR),
-                                ("FFFFFF", "FFFFFF", "1F2A44", "1F2A44")):
-        ser.graphicalProperties.solidFill = colour
-        ser.graphicalProperties.line.solidFill = colour
+            sz=sz, b=bold, solidFill=hexc)), endParaRPr=CharacterProperties())])
+
+    bar = BarChart(); bar.type = "col"; bar.grouping = "clustered"; bar.overlap = 100
+    bar.gapWidth = 55; bar.title = title; bar.style = 10; bar.height = h; bar.width = w
+    bar.add_data(Reference(ws, min_col=hcol + 1, max_col=hcol + 3, min_row=hdr_row, max_row=last),
+                 titles_from_data=True)
+    bar.set_categories(Reference(ws, min_col=hcol, max_col=hcol, min_row=first, max_row=last))
+    for ser, band in zip(bar.series, ("red", "amber", "green")):
+        ser.graphicalProperties.solidFill = C_RAG[band]
+        ser.graphicalProperties.line.solidFill = C_RAG[band]
         ser.dLbls = DataLabelList()
         ser.dLbls.showVal = True
         ser.dLbls.showSerName = ser.dLbls.showCatName = ser.dLbls.showLegendKey = False
-        ser.dLbls.position = "inEnd"
-        ser.dLbls.txPr = _lbl_font(txt)
+        ser.dLbls.position = "ctr"           # centred in the bar: clear of the target line
+        ser.dLbls.txPr = _txt(1000, True, "FFFFFF")
+    if cur_idx is not None and cur_band:                       # in-progress period
+        pt = DataPoint(idx=cur_idx)
+        pt.graphicalProperties.solidFill = C_RAG_CUR[cur_band]
+        pt.graphicalProperties.line.solidFill = NAVY
+        pt.graphicalProperties.line.dashStyle = "dash"
+        pt.graphicalProperties.line.width = 15875               # 1.25 pt
+        bar.series[("red", "amber", "green").index(cur_band)].dPt.append(pt)
+
+    vmax = max([ws.cell(r, c).value or 0 for r in range(first, last + 1) for c in range(hcol + 1, hcol + 4)]
+               + [target or 0])
     bar.y_axis.scaling.min = 0
-    bar.y_axis.title = "Walk-In Leads"
+    bar.y_axis.scaling.max, step = _nice_axis_max(vmax)
+    # per-bar label overrides: a very short bar gets its number ABOVE it (dark), and
+    # the lighter current-period bar gets dark text — white would not be readable
+    from openpyxl.chart.label import DataLabel
+    small = bar.y_axis.scaling.max * 0.10
+    for s, ser in enumerate(bar.series):
+        for k, rr in enumerate(range(first, last + 1)):
+            v = ws.cell(rr, hcol + 1 + s).value
+            if v is None:
+                continue
+            if v < small or k == cur_idx:
+                ser.dLbls.dLbl.append(DataLabel(
+                    idx=k, showVal=True, showSerName=False, showCatName=False, showLegendKey=False,
+                    showPercent=False, showBubbleSize=False, dLblPos=("outEnd" if v < small else "ctr"),
+                    txPr=_txt(1000, True, "1F2A44")))
+    if step:
+        bar.y_axis.majorUnit = step
+    bar.y_axis.title = "Walk-In leads"
+    bar.y_axis.numFmt = "0"
     bar.y_axis.majorGridlines.spPr = GraphicalProperties(ln=LineProperties(solidFill="E3E8EF"))
-    bar.x_axis.title = f"{unit} (* = current, in progress)"
+    bar.y_axis.txPr = _txt(900, False, "5B6B86")
+    bar.x_axis.txPr = _txt(900, True, "1F2A44")
     bar.x_axis.delete = False
     bar.y_axis.delete = False
     bar.legend.position = "b"
+
     line = LineChart()
-    line.add_data(Reference(ws, min_col=hcol + 5, max_col=hcol + 5, min_row=hdr_row, max_row=last),
+    line.add_data(Reference(ws, min_col=hcol + 4, max_col=hcol + 4, min_row=hdr_row, max_row=last),
                   titles_from_data=True)
     tl = line.series[0]
     tl.smooth = False
     tl.graphicalProperties.line.solidFill = C_TARGET
-    tl.graphicalProperties.line.width = 28575          # 2.25 pt
+    tl.graphicalProperties.line.width = 31750           # 2.5 pt
     tl.graphicalProperties.line.dashStyle = "dash"
     tl.marker = Marker(symbol="none")
     bar += line
@@ -539,24 +587,41 @@ def _lead_trend_chart(ws, title, hdr_row, first, last, hcol, anchor, unit, w=24,
 
 def _lead_trend_tab(wb, period, trend, gen_stamp):
     """'Weekly Lead Trend' / 'Monthly Lead Trend': last 11 completed weeks / months
-    + the current one — actual Walk-In leads, target, achievement %, status, and a
-    chart of actual vs the target reference line. Same rows as the e-mail section
-    (walkin_targets.trend_for_period)."""
+    + the current one — actual Walk-In leads, target, achievement %, Red / Amber /
+    Green performance band, and a clean column chart of actual leads vs the target
+    line. Same rows as the e-mail section (walkin_targets.trend_for_period).
+    Bands (walkin_targets.perf_band): share of THAT period's own target — the
+    monthly target for a month, the derived weekly target for a week."""
     import walkin_targets as WT
+    from openpyxl.formatting.rule import FormulaRule
+    from openpyxl.worksheet.pagebreak import Break
     is_week = trend["kind"] == "week"
     unit, Unit = ("week", "Week") if is_week else ("month", "Month")
+    Per = "Weekly" if is_week else "Monthly"
     rows = trend["tab"]
     n_done = len(rows) - 1
-    ws = wb.create_sheet(f"{'Weekly' if is_week else 'Monthly'} Lead Trend")
+    T = float(trend["monthly_target"])
+    lo_pct, hi_pct = WT.RAG_RED_BELOW, WT.RAG_GREEN_ABOVE
+    ws = wb.create_sheet(f"{Per} Lead Trend")
     ws.sheet_view.showGridLines = False
     NC = 6
     _header_block(ws, period, f"Walk-In Lead Performance vs Target — Last {n_done} Completed "
                               f"{Unit}s + Current {Unit}", gen_stamp, ncol=NC)
     r = 4
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=NC)
-    c = ws.cell(r, 1, WT.target_formula_text(trend["kind"], trend["monthly_target"])
-                + "   Green = actual above target · Red = at or below target · lighter tint / * = "
-                  f"current {unit}, still in progress.")
+    ref_t = rows[-1]["target"]                    # current period's target, for the lead examples
+    # whole-lead band edges, from the same perf_band rule the colours use
+    _b = [WT.perf_band(n, ref_t) for n in range(0, int(ref_t * 2) + 2)]
+    red_max = max(n for n, b in enumerate(_b) if b == "red")
+    grn_min = min(n for n, b in enumerate(_b) if b == "green")
+    scope = (f"of the {T:g} target" if not is_week else
+             f"of each week's own target — e.g. a {ref_t:g}-lead week")
+    note = (WT.target_formula_text(trend["kind"], trend["monthly_target"])
+            + f"   Colours (share {scope}):  Red = below {lo_pct:g}% ({red_max} leads or fewer)  ·  "
+              f"Amber = {lo_pct:g}–{hi_pct:g}% ({red_max + 1}–{grn_min - 1} leads)  ·  Green = above "
+              f"{hi_pct:g}% ({grn_min} leads or more).  The current {unit} is counted to date and still "
+              f"in progress.")
+    c = ws.cell(r, 1, note)
     c.font = _F(8.5, False, GREY); c.alignment = Alignment(wrap_text=True, vertical="center", indent=1)
     ws.row_dimensions[r].height = 30
     r += 2
@@ -569,11 +634,11 @@ def _lead_trend_tab(wb, period, trend, gen_stamp):
     _kpi(ws, 1, r, f"Completed {unit}s above target", f"{above} of {len(done)}",
          f"last {len(done)} completed {unit}s", C_ABOVE if above * 2 >= len(done) else C_BELOW)
     _kpi(ws, 3, r, f"Average leads per {unit}", f"{avg:.1f}",
-         f"completed {unit}s · avg target {avg_t:.1f}", C_ABOVE if avg > avg_t else C_BELOW)
+         f"completed {unit}s · avg target {avg_t:.1f}", T_RAG[WT.perf_band(avg, round(avg_t, 1))])
     _kpi(ws, 5, r, f"Current {unit} ({'to date' if cur_row['in_progress'] else 'complete'})",
          f"{cur_row['actual']} / {cur_row['target']:g}",
          (WT.progress_text(cur_row) if cur_row["in_progress"] else cur_row["status"]),
-         C_ABOVE if cur_row["above"] else C_BELOW)
+         T_RAG[WT.perf_band(cur_row["actual"], cur_row["target"])])
     ws.row_dimensions[r + 2].height = 26
     for cc in (1, 3, 5):
         ws.cell(r + 2, cc).alignment = CEN
@@ -581,22 +646,26 @@ def _lead_trend_tab(wb, period, trend, gen_stamp):
 
     _title(ws, r, f"{Unit}-wise Walk-In Leads vs Target", ncol=NC); r += 1
     _thead(ws, r, ["#", f"{Unit} Period" + (" (Mon–Sun)" if is_week else ""), "Walk-In Leads",
-                   f"{'Weekly' if is_week else 'Monthly'} Target", "Achievement %",
-                   "Performance Status"])
+                   f"{Per} Target", "Achievement %", "Performance Status"])
     hdr = r
     r += 1
     first = r
+    tnum = "0.0" if is_week else "0"
+    bands = []
     for i, x in enumerate(rows, 1):
-        bg = F_GREEN if x["above"] else F_RED
+        band = WT.perf_band(x["actual"], x["target"])
+        bands.append(band)
+        bg, fg = F_RAG[band], T_RAG[band]
         label = WT.period_label(x) + ("  ▶ current" if x["current"] else "")
-        stat = x["status"] + (f" · {WT.progress_text(x)}" if x["in_progress"] else "")
+        stat = (WT.BAND_LABELS[band] + (" · target exceeded" if x["above"] else "")
+                + (f" · {WT.progress_text(x)}" if x["in_progress"] else ""))
+        pct = WT.achievement_pct(x["actual"], x["target"])
         _cell(ws, r, 1, i, color=GREY)
         _cell(ws, r, 2, label, al=LEF, b=x["current"])
         _cell(ws, r, 3, x["actual"], b=True)
-        _cell(ws, r, 4, x["target"], num=("0.0" if is_week else "0"))
-        _cell(ws, r, 5, (x["achievement"] / 100.0) if x["achievement"] is not None else "—",
-              num="0.0%", b=True, color=(C_ABOVE if x["above"] else C_BELOW))
-        _cell(ws, r, 6, stat, al=LEF, b=True, color=(C_ABOVE if x["above"] else C_BELOW))
+        _cell(ws, r, 4, x["target"], num=tnum)
+        _cell(ws, r, 5, (pct / 100.0) if pct is not None else "—", num="0.0%", b=True, color=fg)
+        _cell(ws, r, 6, stat, al=LEF, b=True, color=fg)
         _row_fill(ws, r, NC, bg)
         if x["current"]:
             for cc in range(1, NC + 1):
@@ -606,38 +675,65 @@ def _lead_trend_tab(wb, period, trend, gen_stamp):
             ws.row_dimensions[r].height = 30 if x["in_progress"] else 18
         r += 1
     last = r - 1
+    # Real conditional formatting as well, driven by the row's own Walk-In Leads /
+    # Target cells — same bands as the static fills above, so the colours stay
+    # right in Excel / Google Sheets even if a value is edited.
+    rng = f"A{first}:F{last}"
+    ok = f"ISNUMBER($C{first}),ISNUMBER($D{first}),$D{first}>0"
+    ratio = f"$C{first}/$D{first}"
+    lo, hi = lo_pct / 100.0, hi_pct / 100.0
+    for band, cond in (("red", f"{ratio}<{lo}"),
+                       ("amber", f"{ratio}>={lo},{ratio}<={hi}"),
+                       ("green", f"{ratio}>{hi}")):
+        ws.conditional_formatting.add(rng, FormulaRule(
+            formula=[f"AND({ok},{cond})"], fill=_fill(F_RAG[band]), stopIfTrue=True))
     # completed-period total (reconciles with the rows above)
     tot_a = sum(x["actual"] for x in done)
     tot_t = sum(x["target_exact"] for x in done)
+    done_b = bands[:len(done)]
     _cell(ws, r, 1, "", bg=LIGHT)
     _cell(ws, r, 2, f"Completed {unit}s ({len(done)})", b=True, al=LEF, bg=LIGHT)
     _cell(ws, r, 3, tot_a, b=True, bg=LIGHT)
-    _cell(ws, r, 4, round(tot_t, 1), b=True, bg=LIGHT, num=("0.0" if is_week else "0"))
+    _cell(ws, r, 4, round(tot_t, 1), b=True, bg=LIGHT, num=tnum)
     _cell(ws, r, 5, (tot_a / tot_t) if tot_t else "—", b=True, bg=LIGHT, num="0.0%")
-    _cell(ws, r, 6, f"{above} of {len(done)} {unit}s above target", b=True, al=LEF, bg=LIGHT)
+    _cell(ws, r, 6, f"{above} of {len(done)} {unit}s above target  ·  Green {done_b.count('green')} · "
+                    f"Amber {done_b.count('amber')} · Red {done_b.count('red')}", b=True, al=LEF, bg=LIGHT)
     r += 2
 
     # chart data helper, far right (col AF+) and outside the print area — the
     # report's existing pattern for chart-only data
     hcol = 32
-    for j, h in enumerate(["Period", f"Above target", f"At / below target",
-                           f"Current {unit} · above", f"Current {unit} · at / below",
-                           f"{'Weekly' if is_week else 'Monthly'} target"]):
+    cur_idx = next((k for k, x in enumerate(rows) if x["in_progress"]), None)
+    tvals = sorted({x["target"] for x in rows})
+    t_txt = f"{tvals[0]:g}" if len(tvals) == 1 else f"{tvals[0]:g}–{tvals[-1]:g}"
+    heads = [Unit, WT.BAND_LABELS["red"], WT.BAND_LABELS["amber"], WT.BAND_LABELS["green"],
+             f"{Per} target" + (f" ({T:g})" if not is_week else "")]
+    for j, h in enumerate(heads):
         ws.cell(hdr, hcol + j, h)
-    for k, x in enumerate(rows):
+    for k, (x, band) in enumerate(zip(rows, bands)):
         rr = first + k
-        ws.cell(rr, hcol, WT.short_label(x))
-        slot = (2 if x["above"] else 3) if x["in_progress"] else (0 if x["above"] else 1)
-        for s in range(4):
-            ws.cell(rr, hcol + 1 + s, x["actual"] if s == slot else None)
-        ws.cell(rr, hcol + 5, x["target"])
-    _title(ws, r, f"Walk-In Leads vs {'Weekly' if is_week else 'Monthly'} Target — "
-                  f"Last {n_done} Completed {Unit}s + Current {Unit}", ncol=NC)
+        base = x["start"].strftime("%d-%b") if is_week else x["start"].strftime("%b-%y")
+        ws.cell(rr, hcol, base + (" (to date)" if x["in_progress"] else ""))
+        for s, b in enumerate(("red", "amber", "green")):
+            ws.cell(rr, hcol + 1 + s, x["actual"] if b == band else None)
+        ws.cell(rr, hcol + 4, x["target"])
+    ws.row_breaks.append(Break(id=r - 1))            # chart section starts on its own printed page
+    _title(ws, r, f"Walk-In Leads vs {Per} Target — Last {n_done} Completed {Unit}s + Current {Unit}",
+           ncol=NC)
     r += 1
-    _lead_trend_chart(ws, f"Walk-In Leads per {Unit} vs Target", hdr, first, last, hcol,
-                      f"A{r}", Unit)
-    r += 21
-
+    what = ("one Mon–Sun week, labelled by its Monday" if is_week else "Walk-In leads in the month")
+    c = ws.cell(r, 1, f"Each bar = {what} (number in the bar).  Dashed line = {unit}ly target ({t_txt}).  "
+                      f"Red < {lo_pct:g}% · Amber {lo_pct:g}–{hi_pct:g}% · Green > {hi_pct:g}% of target.  "
+                      + (f"Lighter bar with dashed outline = current {unit}, still in progress."
+                         if cur_idx is not None else ""))
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=NC)
+    c.font = _F(8.5, False, GREY); c.alignment = Alignment(wrap_text=True, vertical="center", indent=1)
+    ws.row_dimensions[r].height = 30
+    r += 2
+    _lead_chart(ws, f"{Per} Walk-In Leads vs Target ({t_txt}{' per week' if is_week else ''})",
+                hdr, first, last, hcol, f"A{r}", tvals[-1], cur_idx,
+                bands[cur_idx] if cur_idx is not None else None)
+    r += 24
     for col, w in {"A": 6, "B": 34, "C": 15, "D": 15, "E": 15, "F": 46}.items():
         ws.column_dimensions[col].width = w
     ws.print_area = f"A1:{get_column_letter(NC)}{r}"

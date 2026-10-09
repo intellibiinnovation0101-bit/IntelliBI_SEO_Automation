@@ -76,13 +76,21 @@ def find_or_create_folder(drive, parent_id: str, name: str) -> str:
     return f.get("id")
 
 
-def read_tab(sheets, spreadsheet_id: str, tab: str) -> list:
-    """Return all rows of a tab as a list of lists (values only, un-padded)."""
+def read_tab(sheets, spreadsheet_id: str, tab: str, date_render: str = "FORMATTED_STRING") -> list:
+    """Return all rows of a tab as a list of lists (values only, un-padded).
+
+    date_render: how REAL date/time cells come back —
+      "FORMATTED_STRING" (default): the text the sheet displays, which depends on
+                         the spreadsheet's locale / number format (e.g. "5/14/2026"
+                         in a US-locale sheet, "14/05/2026" in an Indian one);
+      "SERIAL_NUMBER":   the date's actual value (days since 30-Dec-1899), the
+                         same whatever the locale or display format. Cells that
+                         hold TEXT are returned as text either way."""
     rng = f"'{tab}'"
     resp = sheets.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id, range=rng,
         valueRenderOption="UNFORMATTED_VALUE",
-        dateTimeRenderOption="FORMATTED_STRING",
+        dateTimeRenderOption=date_render,
     ).execute()
     return resp.get("values", [])
 

@@ -20,6 +20,9 @@ Command-line flags are still accepted and OVERRIDE the settings for that one run
 
 Everything else (source sheet, Drive parent folder / sub-folder names, email
 recipients & sender, normalization, week start, timezone) lives in config/.
+The Walk-In lead target (Weekly / Monthly) lives in config/walkin_target.yaml —
+check it without running the reports:
+    python seo_reports/pySEOWalkInAnalysisReport.py --check-target
 """
 from __future__ import annotations
 import argparse
@@ -41,12 +44,16 @@ import report_periods            # noqa: E402
 import report_builder            # noqa: E402
 import walkin_data               # noqa: E402
 import walkin_targets            # noqa: E402
+import target_config             # noqa: E402
 
 log = logging_utils.get_logger("pySEOWalkInAnalysisReport")
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  USER SETTINGS  — edit these; run the file with no parameters.
 # ═══════════════════════════════════════════════════════════════════════════
+# Walk-In lead target: NOT set here — edit config/walkin_target.yaml
+# (MONTHLY_WALKIN_LEAD_TARGET). Weekly target is derived from it automatically.
+
 GENERATE_WEEKLY  = True
 GENERATE_MONTHLY = True
 GENERATE_MANUAL  = False          # Manual = a custom start/end date range
@@ -59,11 +66,17 @@ MANUAL_START_DATE     = None      # "YYYY-MM-DD"  (required when GENERATE_MANUAL
 MANUAL_END_DATE       = None      # "YYYY-MM-DD"  (required when GENERATE_MANUAL)
 
 EMAIL_SEND = True                 # email the report(s)? (recipients live in config.yaml)
+# Star (★) each report e-mail in Gmail — in the Info mailbox ONLY (its own copy;
+# other recipients are never touched, the subject is not changed). Uses
+# common/gmail_star.py (same as Sales / Operations); best-effort — a starring
+# problem is only logged and never affects sending, the report or the exit code.
+STAR_EMAIL_IN_GMAIL = True
+STAR_MAILBOX        = "info@intellibiinnovationstechnologies.in"
 
-# Walk-In lead performance vs target (Weekly / Monthly only). Target: config.yaml
-# report.monthly_walkin_target (70 per month); the weekly target is derived from
-# it day by day (see common/walkin_targets.py). Counts = completed periods shown
-# BEFORE the current week / month.
+# Walk-In lead performance vs target (Weekly / Monthly only). Target:
+# config/walkin_target.yaml; the weekly target is derived from it day by day
+# (see common/walkin_targets.py). Counts = completed periods shown BEFORE the
+# current week / month.
 TREND_WEEKS_EMAIL  = 5            # e-mail: last 5 completed weeks + current week
 TREND_WEEKS_TAB    = 11           # "Weekly Lead Trend" tab: last 11 + current week
 TREND_MONTHS_EMAIL = 5            # e-mail: last 5 completed months + current month
@@ -108,15 +121,24 @@ def _window(records, start, end):
     return [r for r in records if r["date"] and start <= r["date"] <= end]
 
 
-def _lead_trend(period, records):
+def _is_target_period(period) -> bool:
+    return str(period.label).lower() in ("weekly", "monthly")
+
+
+def _load_target():
+    """Monthly Walk-In lead target from config/walkin_target.yaml (validated;
+    raises target_config.TargetConfigError)."""
+    return target_config.load_monthly_target(warn=log.warning)
+
+
+def _lead_trend(period, records, target=None):
     """Weekly / Monthly Walk-In lead performance vs target (None for Manual): last
     TREND_*_EMAIL completed periods + the current one for the e-mail, last
-    TREND_*_TAB + the current one for the Lead Trend tab — one calculation for both."""
-    target = cfg.get("report.monthly_walkin_target", walkin_targets.DEFAULT_MONTHLY_TARGET)
-    try:
-        target = float(target)
-    except (TypeError, ValueError):
-        target = float(walkin_targets.DEFAULT_MONTHLY_TARGET)
+    TREND_*_TAB + the current one for the Lead Trend tab — one calculation for both.
+    `target` = the validated monthly target (read from the file when not given)."""
+    if not _is_target_period(period):
+        return None
+    target = float(_load_target() if target is None else target)
     weekly = str(period.label).lower() == "weekly"
     return walkin_targets.trend_for_period(
         records, period, target,
@@ -124,11 +146,11 @@ def _lead_trend(period, records):
         n_tab=TREND_WEEKS_TAB if weekly else TREND_MONTHS_TAB)
 
 
-def _build_one(period, records, gen_stamp, sample=False):
+def _build_one(period, records, gen_stamp, sample=False, target=None):
     cur = _window(records, period.cur_start, period.cur_end)
     prev = _window(records, period.prev_start, period.prev_end)
     gs = cfg.get("report.google_search_label", "Google Search")
-    trend = _lead_trend(period, records)
+    trend = _lead_trend(period, records, target)
     wb = report_builder.build_workbook(period, cur, prev, gs, gen_stamp, sample=sample, trend=trend)
     paths.ensure_dirs()
     out_path = os.path.join(str(paths.OUTPUT_DIR), period.fname() + ".xlsx")
@@ -207,7 +229,8 @@ def _email(period, cur, prev, drive_link, gen_stamp, out_path, send_email, trend
         import email_utils
         gs = cfg.get("report.google_search_label", "Google Search")
         email_utils.send_report(period, cur, prev, gs, drive_link, gen_stamp, out_path,
-                                trend=trend)
+                                trend=trend,
+                                star_mailbox=STAR_MAILBOX if STAR_EMAIL_IN_GMAIL else None)
     except Exception as e:
         log.warning("  email step skipped/failed: %s", e)
 
@@ -268,6 +291,23 @@ def run(periods, upload=True, send_email=True):
         return True
     gen_stamp = _now_stamp()
 
+    # Walk-In lead target (Weekly / Monthly only) — read and validated BEFORE any
+    # Google call, so a bad config/walkin_target.yaml never produces a report,
+    # e-mail or upload with a wrong target. Manual reports do not use it.
+    target, target_ok = None, True
+    if any(_is_target_period(p) for p in periods):
+        try:
+            target = _load_target()
+            log.info("Walk-In lead target: %d per month (%s)", target, target_config.TARGET_FILE.name)
+        except target_config.TargetConfigError as e:
+            target_ok = False
+            skipped = ", ".join(p.label for p in periods if _is_target_period(p))
+            log.error("Walk-In target configuration error — %s report(s) NOT generated "
+                      "(no workbook, upload or e-mail): %s", skipped, e)
+            periods = [p for p in periods if not _is_target_period(p)]
+            if not periods:
+                return False
+
     try:
         import google_utils
         sheets, drive = google_utils.get_services()
@@ -282,16 +322,29 @@ def run(periods, upload=True, send_email=True):
         log.error("No Walk-In records loaded — aborting (nothing written).")
         return False
 
-    ok = True
+    ok = target_ok
     for p in periods:
         try:
-            out_path, cur, prev, trend = _build_one(p, records, gen_stamp)
+            out_path, cur, prev, trend = _build_one(p, records, gen_stamp, target=target)
             link = _upload(drive, out_path, p) if upload else None
             _email(p, cur, prev, link, gen_stamp, out_path, send_email, trend=trend)
         except Exception as e:
             ok = False
             log.exception("%s report FAILED: %s", p.label, e)
     return ok
+
+
+def _check_target() -> int:
+    """--check-target: validate the target file and print what the reports will use."""
+    try:
+        t = _load_target()
+    except target_config.TargetConfigError as e:
+        log.error("Walk-In target configuration error: %s", e)
+        return 1
+    log.info("OK — %s: MONTHLY_WALKIN_LEAD_TARGET = %d per month", target_config.TARGET_FILE, t)
+    log.info("Weekly target (derived): 31-day month %.1f · 30-day month %.1f · February %.1f / %.1f",
+             7 * t / 31, 7 * t / 30, 7 * t / 28, 7 * t / 29)
+    return 0
 
 
 def _parse_date(s):
@@ -312,7 +365,12 @@ def main(argv=None):
                     help="Force-send the report email (overrides EMAIL_SEND).")
     ap.add_argument("--no-email", dest="email", action="store_false",
                     help="Do not send any email (overrides EMAIL_SEND).")
+    ap.add_argument("--check-target", action="store_true",
+                    help="Only validate config/walkin_target.yaml and show the targets; no report.")
     args = ap.parse_args(argv)
+
+    if args.check_target:
+        return _check_target()
 
     periods = _resolve_periods(args.mode, args.as_of, args.start, args.end)
     upload = UPLOAD_TO_DRIVE and (not args.no_upload)

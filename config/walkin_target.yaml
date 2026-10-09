@@ -1,0 +1,23 @@
+# ============================================================================
+#  IntelliBI SEO Walk-In Analysis — Walk-In lead target
+#
+#  The ONLY place the Walk-In lead target is set. Change the number, save the
+#  file — no Python changes needed. The next Weekly / Monthly run picks it up.
+#
+#  MONTHLY_WALKIN_LEAD_TARGET = Walk-In leads per calendar month.
+#    Monthly report : target = this number, every month.
+#    Weekly report  : derived automatically = this number ÷ days in the month,
+#                     summed over Mon–Sun (100 -> 22.6 in a 31-day month,
+#                     23.3 in a 30-day month, 25.0 in February).
+#  Used for: the e-mail "Walk-In Lead Performance" section, the "Weekly /
+#  Monthly Lead Trend" tab, its chart target line, Achievement % and the
+#  Above (green: Actual > Target) / Below (red: Actual <= Target) status.
+#
+#  Rules (checked at every run; a bad value stops the Weekly / Monthly reports
+#  with a clear message in the log — nothing is e-mailed or uploaded):
+#    - a whole number from 1 to 10000, e.g. 100   (no quotes, commas or %)
+#    - exactly one line with this name; keep the name as written
+#  Check the file without running the reports:
+#    python seo_reports/pySEOWalkInAnalysisReport.py --check-target
+# ============================================================================
+MONTHLY_WALKIN_LEAD_TARGET: 100

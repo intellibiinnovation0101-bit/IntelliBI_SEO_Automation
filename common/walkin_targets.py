@@ -6,16 +6,19 @@ Pure functions (no Google access) shared by the e-mail and the workbook, so the
 Monthly Lead Trend" tabs always show the SAME figures.
 
 TARGETS
-  Monthly target  = report.monthly_walkin_target in config.yaml (default 70)
-                    Walk-In leads per calendar month.
+  Monthly target  = MONTHLY_WALKIN_LEAD_TARGET in config/walkin_target.yaml
+                    (read + validated by common/target_config.py), Walk-In
+                    leads per calendar month. Passed in by the caller — this
+                    module holds no target value of its own.
   Weekly target   = the monthly target spread evenly over the days of each
                     calendar month, summed over the 7 days (Mon–Sun) of the week:
 
                         weekly_target = Σ  monthly_target / days_in_month(d)
                                         d ∈ Mon..Sun
 
-                    A week inside a 31-day month = 7 × 70 / 31 = 15.8; inside a
-                    30-day month = 16.3; inside February (28 days) = 17.5; a week
+                    A week inside a 31-day month = 7 × T / 31; inside a 30-day
+                    month = 7 × T / 30; inside February (28 days) = 7 × T / 28
+                    (T = 100 -> 22.6 / 23.3 / 25.0); a week
                     that crosses a month end takes each day from its own month.
                     Summed over a whole month, the daily shares add back up to
                     exactly the monthly target, so weekly and monthly targets
@@ -44,7 +47,6 @@ from __future__ import annotations
 import calendar
 import datetime as _dt
 
-DEFAULT_MONTHLY_TARGET = 70
 ABOVE, BELOW = "Above Target", "Below Target"
 
 
@@ -106,7 +108,7 @@ def _row(records, kind, start, end, asof, monthly_target):
 
 
 def weekly_trend(records, asof: _dt.date, n_completed: int,
-                 monthly_target: float = DEFAULT_MONTHLY_TARGET) -> list:
+                 monthly_target: float) -> list:
     """Last `n_completed` full Mon–Sun weeks + the week containing `asof`
     (oldest first)."""
     cws = week_start(asof)
@@ -118,7 +120,7 @@ def weekly_trend(records, asof: _dt.date, n_completed: int,
 
 
 def monthly_trend(records, asof: _dt.date, n_completed: int,
-                  monthly_target: float = DEFAULT_MONTHLY_TARGET) -> list:
+                  monthly_target: float) -> list:
     """Last `n_completed` calendar months + the month containing `asof`
     (oldest first). Each month's target = the monthly target."""
     out = []
@@ -128,7 +130,7 @@ def monthly_trend(records, asof: _dt.date, n_completed: int,
     return out
 
 
-def trend_for_period(records, period, monthly_target=DEFAULT_MONTHLY_TARGET,
+def trend_for_period(records, period, monthly_target,
                      n_email=5, n_tab=11):
     """{'email': rows, 'tab': rows, 'kind': 'week'|'month', 'monthly_target'} for a
     Weekly / Monthly report period, else None (Manual has no trend)."""
@@ -143,6 +145,38 @@ def trend_for_period(records, period, monthly_target=DEFAULT_MONTHLY_TARGET,
     tab = fn(records, asof, n_tab, monthly_target)
     return {"kind": kind, "monthly_target": monthly_target, "asof": asof,
             "tab": tab, "email": tab[-(n_email + 1):]}
+
+
+# ── Monthly performance bands (Red / Amber / Green) ──────────────────────────
+# Share of the configured monthly target (config/walkin_target.yaml) reached:
+#   Red    below 60 %            Amber  60 % to 80 % (both inclusive)
+#   Green  above 80 %
+# Used by the "Weekly Lead Trend" and "Monthly Lead Trend" tabs (table colours +
+# chart bars) — a week against its own derived weekly target, a month against the
+# monthly target. The Above / Below Target status above is unchanged (e-mail, the
+# "completed periods above target" card).
+RAG_RED_BELOW = 60.0
+RAG_GREEN_ABOVE = 80.0
+BAND_RED, BAND_AMBER, BAND_GREEN = "red", "amber", "green"
+BAND_LABELS = {BAND_RED: "Below 60% of target",
+               BAND_AMBER: "60–80% of target",
+               BAND_GREEN: "Above 80% of target"}
+
+
+def achievement_pct(actual, target):
+    """actual / target in % (None when there is no target), rounded to 6 dp so a
+    float target such as 100.00000000000003 never moves a month across a band."""
+    if not target:
+        return None
+    return round(actual / float(target) * 100.0, 6)
+
+
+def perf_band(actual, target) -> str:
+    """'red' (< 60 %), 'amber' (60–80 % inclusive) or 'green' (> 80 %) of target."""
+    pct = achievement_pct(actual, target)
+    if pct is None or pct < RAG_RED_BELOW:
+        return BAND_RED
+    return BAND_AMBER if pct <= RAG_GREEN_ABOVE else BAND_GREEN
 
 
 # ── labels ───────────────────────────────────────────────────────────────────

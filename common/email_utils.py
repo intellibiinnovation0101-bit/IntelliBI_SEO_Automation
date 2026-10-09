@@ -201,9 +201,64 @@ def build_body(period, cur, prev, gs_label, drive_link, gen_stamp, trend=None):
 </div>"""
 
 
-def send(subject, html_body, recipients, sender, attachment_path=None, dry_run=False):
+def _mailbox_password(mailbox: str):
+    """App password of EXACTLY this Gmail account from credentials/email_config.py
+    (GMAIL_SENDER or GMAIL_SENDER_DIGITAL), else None — never another account's."""
+    try:
+        import email_config as ec
+    except Exception:                                        # noqa: BLE001
+        return None
+    mb = (mailbox or "").strip().lower()
+    for s_attr, p_attr in (("GMAIL_SENDER", "GMAIL_APP_PASS"),
+                           ("GMAIL_SENDER_DIGITAL", "GMAIL_APP_PASS_DIGITAL")):
+        s = str(getattr(ec, s_attr, "") or "").strip()
+        if s and s.lower() == mb:
+            return getattr(ec, p_attr, "") or None
+    return None
+
+
+def _gmail_star():
+    """common/gmail_star.py (shared with Sales / Operations), or None."""
+    try:
+        import gmail_star
+        return gmail_star
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("  [Email] ★ starring unavailable — common/gmail_star.py: %s", e)
+        return None
+
+
+def _star_log(m):
+    m = str(m).strip()
+    (log.warning if "not starred" in m else log.info)(m)
+
+
+def _star_plan(star_mailbox, recipients):
+    """(gmail_star module, mailbox, app password) when the e-mail should be starred
+    in `star_mailbox` (the Info mailbox), else None. Only that mailbox is ever
+    starred, and only when it is one of the recipients — other recipients' copies
+    are never touched."""
+    mb = (star_mailbox or "").strip()
+    if not mb:
+        return None
+    if mb.lower() not in {str(r).strip().lower() for r in recipients}:
+        log.info("  [Email] ★ not starred — %s is not a recipient of this e-mail.", mb)
+        return None
+    pw = _mailbox_password(mb)
+    if not pw:
+        log.warning("  [Email] ★ not starred — no app password for %s in "
+                    "credentials/email_config.py (the e-mail is still sent).", mb)
+        return None
+    gs = _gmail_star()
+    return (gs, mb, pw) if gs is not None else None
+
+
+def send(subject, html_body, recipients, sender, attachment_path=None, dry_run=False,
+         star_mailbox=None):
     """Send the email. When dry_run is True the MIME message is built and returned
-    but NOT sent (used for validation)."""
+    but NOT sent (used for validation).
+    star_mailbox: after a SUCCESSFUL send, mark the e-mail Starred (★) in THAT Gmail
+    mailbox only (the Info mailbox) via common/gmail_star.py — best-effort, never
+    changes the subject, recipients, body or the send result."""
     sender, app_pass = _creds(sender)
     if not recipients:
         log.warning("No recipients configured — email not sent.")
@@ -212,6 +267,9 @@ def send(subject, html_body, recipients, sender, attachment_path=None, dry_run=F
     msg["Subject"] = subject
     msg["From"] = sender
     msg["To"] = ", ".join(recipients)
+    star = _star_plan(star_mailbox, recipients) if (star_mailbox and not dry_run) else None
+    if star is not None:                     # a known Message-ID lets the copy be found & starred
+        msg["Message-ID"] = star[0].new_message_id(sender)
     alt = MIMEMultipart("alternative")
     alt.attach(MIMEText("This report is best viewed as HTML.", "plain", "utf-8"))
     alt.attach(MIMEText(html_body, "html", "utf-8"))
@@ -230,14 +288,20 @@ def send(subject, html_body, recipients, sender, attachment_path=None, dry_run=F
             srv.login(sender, app_pass)
             srv.sendmail(sender, recipients, msg.as_string())
         log.info("  emailed report to %s", ", ".join(recipients))
-        return True
     except Exception as e:
         log.warning("  email send failed: %s", e)
         return False
+    if star is not None:                     # best-effort; never changes the result
+        try:
+            gs, mb, pw = star
+            gs.star_sent_message(mb, pw, msg["Message-ID"], subject, log=_star_log)
+        except Exception as e:               # noqa: BLE001
+            log.warning("  [Email] ★ not starred — %s (the e-mail itself was sent).", e)
+    return True
 
 
 def send_report(period, cur, prev, gs_label, drive_link, gen_stamp,
-                attachment_path, dry_run=False, trend=None):
+                attachment_path, dry_run=False, trend=None, star_mailbox=None):
     """High-level: build the body from config recipients/sender and send."""
     recipients = cfg.get("email.recipients", []) or []
     sender = cfg.get("email.sender", "info@intellibiinnovationstechnologies.in")
@@ -245,4 +309,5 @@ def send_report(period, cur, prev, gs_label, drive_link, gen_stamp,
     subject = (f"IntelliBI SEO Walk-In — {period.label} "
                f"({period.cur_start.strftime('%d-%b')}–{period.cur_end.strftime('%d-%b-%Y')})")
     body = build_body(period, cur, prev, gs_label, drive_link, gen_stamp, trend=trend)
-    return send(subject, body, recipients, sender, attach, dry_run=dry_run)
+    return send(subject, body, recipients, sender, attach, dry_run=dry_run,
+                star_mailbox=star_mailbox)
